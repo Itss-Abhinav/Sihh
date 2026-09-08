@@ -196,6 +196,24 @@ class MockLabelExtractionService(LabelExtractionService):
                         mrp_val = cand
                         mrp_source = src
 
+        # Fallback: Look for any standalone price-like numbers in specific lines
+        if not mrp_val:
+            for line in lines:
+                line_lower = line.lower()
+                # Look for lines that mention MRP or price explicitly
+                if re.search(r'\b(?:m\.?r\.?p|price|retail)\b', line_lower):
+                    price_num = re.search(r'(\d{1,5}(?:\.\d{1,2})?)', line)
+                    if price_num:
+                        val = price_num.group(1)
+                        try:
+                            num = float(val)
+                            if 1 <= num <= 99999:  # reasonable MRP range
+                                mrp_val = val
+                                mrp_source = line
+                                break
+                        except ValueError:
+                            pass
+
         mrp = ExtractedField(
             value=mrp_val,
             confidence=0.95 if mrp_val else 0.0,
@@ -218,14 +236,24 @@ class MockLabelExtractionService(LabelExtractionService):
             qty_source = qty_match[1]
         else:
             fallback_qty = search_patterns([
-                r'(?:Weight|Qty)\s*[:\.\-]?\s*(\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres?)\b)',
-                r'(\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres?)\b)'
+                r'(?:Weight|Qty|Contents?)\.?\s*[:\.\-]?\s*(\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres?)\b)',
+                r'(\b\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres?)\b)',
             ])
             if fallback_qty:
                 candidate_qty = fallback_qty[0]
                 if not re.match(r'^(?:202[0-9]|19[0-9]{2})$', candidate_qty.strip()):
                     net_qty_val = candidate_qty
                     qty_source = fallback_qty[1]
+
+        # Extra fallback: look for lines with weight/volume keywords
+        if not net_qty_val:
+            for line in lines:
+                if re.search(r'\b(?:net|wt|weight|qty|quantity|content)\b', line, re.IGNORECASE):
+                    wt_m = re.search(r'(\d+(?:\.\d+)?\s*(?:kg|g|gm|gms|gram|grams|ml|l|ltr|litres?))\b', line, re.IGNORECASE)
+                    if wt_m:
+                        net_qty_val = wt_m.group(1)
+                        qty_source = line
+                        break
 
         if net_qty_val:
             u_m = re.search(r'(?:[0-9]+(?:\.[0-9]+)?\s*)?(kg|g|gm|gms|gram|grams|ml|l|ltr|litres?|cm|m|sq_dm|sq_m|cu_cm|cu_m|N|U|units?)\b', net_qty_val, re.IGNORECASE)
@@ -337,9 +365,10 @@ class MockLabelExtractionService(LabelExtractionService):
         care_name_m = search_patterns(care_name_patterns)
 
         care_phone_patterns = [
-            r'(?:Toll\s*Free|Phone|Tel|Helpline|Call|Contact)\s*[:\.\-]?\s*([0-9\-\+\s]{7,15})',
+            r'(?:Toll\s*Free|Phone|Tel|Helpline|Call|Contact|Dial)\s*[:\.\-]?\s*([0-9\-\+\s]{7,15})',
             r'\b(1800[-\s]?[0-9]{2,3}[-\s]?[0-9]{3,4})\b',
             r'(\+?91[-\s]?[6-9][0-9]{9})\b',
+            r'\b([6-9][0-9]{9})\b',  # standalone Indian mobile number
         ]
         care_phone_m = search_patterns(care_phone_patterns)
 
@@ -347,6 +376,9 @@ class MockLabelExtractionService(LabelExtractionService):
             r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
         ]
         care_email_m = search_patterns(care_email_patterns)
+
+        # Also look for "www." URLs as contact info
+        care_web_m = search_patterns([r'((?:www\.)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'])
 
         consumer_care_name = ExtractedField(
             value=care_name_m[0] if care_name_m else ("Consumer Care Cell" if (care_phone_m or care_email_m) else None),

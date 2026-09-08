@@ -61,62 +61,73 @@ Batch No: GA-781
 
     def extract_text(self, image_bytes: bytes, filename: Optional[str] = None) -> str:
         """
-        Extract text from packaged commodity image using OCR.space with
-        automatic engine fallbacks and packaging pre-processing.
+        Extract text from packaged commodity image using OCR.space.
+        Tries BOTH engines and merges results for maximum text extraction.
         """
         if not image_bytes or len(image_bytes) < 100:
             return ""
 
         fname = filename or "package_label.jpg"
-        mime_type = "image/jpeg" if fname.lower().endswith(('.jpg', '.jpeg')) else "image/png"
+        ext = fname.lower().rsplit('.', 1)[-1] if '.' in fname else 'jpg'
+        mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp'}
+        mime_type = mime_map.get(ext, 'image/jpeg')
 
-        # Attempt 1: OCR.space Engine 2 (optimized for numbers, packaging dates, and camera photos)
-        try:
-            import httpx
-            files = {"file": (fname, image_bytes, mime_type)}
-            data = {
-                "apikey": "helloworld",
-                "language": "eng",
-                "OCREngine": "2",
-                "scale": "true",
-                "detectOrientation": "true"
-            }
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post("https://api.ocr.space/parse/image", files=files, data=data)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    if not res_json.get("IsErroredOnProcessing", False):
-                        results = res_json.get("ParsedResults", [])
-                        if results:
-                            parsed_text = results[0].get("ParsedText", "").strip()
-                            if len(parsed_text) >= 15:
-                                return parsed_text
-        except Exception:
-            pass
+        results_by_engine = {}
 
-        # Attempt 2: OCR.space Engine 1
-        try:
-            import httpx
-            files = {"file": (fname, image_bytes, mime_type)}
-            data = {
-                "apikey": "helloworld",
-                "language": "eng",
-                "OCREngine": "1",
-                "scale": "true",
-                "detectOrientation": "true"
-            }
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post("https://api.ocr.space/parse/image", files=files, data=data)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    if not res_json.get("IsErroredOnProcessing", False):
-                        results = res_json.get("ParsedResults", [])
-                        if results:
-                            parsed_text = results[0].get("ParsedText", "").strip()
-                            if len(parsed_text) >= 15:
-                                return parsed_text
-        except Exception:
-            pass
+        for engine_id in ["2", "1"]:
+            try:
+                import httpx
+                files = {"file": (fname, image_bytes, mime_type)}
+                data = {
+                    "apikey": "helloworld",
+                    "language": "eng",
+                    "OCREngine": engine_id,
+                    "scale": "true",
+                    "detectOrientation": "true",
+                    "isOverlayRequired": "false",
+                }
+                with httpx.Client(timeout=15.0) as client:
+                    resp = client.post("https://api.ocr.space/parse/image", files=files, data=data)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        if not res_json.get("IsErroredOnProcessing", False):
+                            parsed_results = res_json.get("ParsedResults", [])
+                            if parsed_results:
+                                parsed_text = parsed_results[0].get("ParsedText", "").strip()
+                                if parsed_text:
+                                    results_by_engine[engine_id] = parsed_text
+            except Exception:
+                pass
+
+        # Pick the best result: prefer the longer text (more content extracted)
+        if results_by_engine:
+            # If both engines returned results, combine them for maximum coverage
+            if len(results_by_engine) == 2:
+                text_e2 = results_by_engine.get("2", "")
+                text_e1 = results_by_engine.get("1", "")
+                # Use whichever is longer as primary, but append unique lines from the other
+                if len(text_e2) >= len(text_e1):
+                    primary, secondary = text_e2, text_e1
+                else:
+                    primary, secondary = text_e1, text_e2
+                
+                # Extract lines from secondary that aren't already in primary
+                primary_lower = primary.lower()
+                extra_lines = []
+                for line in secondary.split('\n'):
+                    line_stripped = line.strip()
+                    if line_stripped and len(line_stripped) >= 3:
+                        # Only add if this line's content isn't already present
+                        if line_stripped.lower() not in primary_lower:
+                            extra_lines.append(line_stripped)
+                
+                if extra_lines:
+                    combined = primary + "\n" + "\n".join(extra_lines)
+                    return combined
+                return primary
+            else:
+                # Single engine result
+                return list(results_by_engine.values())[0]
 
         return ""
 
