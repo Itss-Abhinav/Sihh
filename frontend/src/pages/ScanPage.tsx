@@ -11,7 +11,8 @@ import {
   Loader2,
   FileText,
   AlertCircle,
-  Eye
+  HelpCircle,
+  Wand2
 } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import { DemoSelector } from '../components/DemoSelector';
@@ -41,7 +42,7 @@ export const ScanPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const processingSteps = [
-    'Optical Capture & Preprocessing...',
+    'Optical Capture & High-Contrast Preprocessing...',
     'Optical Character Recognition (OCR)...',
     'Structured Metrology Extraction...',
     'Statutory Scope & Exemption Filter...',
@@ -49,43 +50,107 @@ export const ScanPage: React.FC = () => {
     'Synthesizing Compliance Screening Report...'
   ];
 
+  // Preprocess smartphone camera image: downscale to optimal dimensions + grayscale + contrast stretch
+  const preprocessImageForOcr = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            const maxDim = 1600;
+
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(e.target?.result as string);
+              return;
+            }
+
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // Enhance contrast & binarize
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const d = imgData.data;
+            for (let i = 0; i < d.length; i += 4) {
+              const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+              // Apply contrast factor
+              const contrast = 1.35;
+              const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+              const enhanced = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
+              d[i] = enhanced;
+              d[i + 1] = enhanced;
+              d[i + 2] = enhanced;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg', 0.88));
+          } catch (canvasErr) {
+            console.warn('Canvas preprocessor error, falling back to raw:', canvasErr);
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => resolve(e.target?.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve(URL.createObjectURL(file));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const runClientOcr = async (file: File) => {
     setIsOcrRunning(true);
-    setOcrProgress(10);
-    setOcrStatusText('Loading Optical Recognition Model...');
+    setOcrProgress(5);
+    setOcrStatusText('Optimizing image resolution & contrast for packaging...');
     setOcrCompleted(false);
 
     try {
-      const result = await Tesseract.recognize(file, 'eng', {
+      const optimizedImage = await preprocessImageForOcr(file);
+      setOcrProgress(20);
+      setOcrStatusText('Scanning packaging text with Optical Character Recognition...');
+
+      const result = await Tesseract.recognize(optimizedImage, 'eng', {
         logger: (m) => {
           if (m.status === 'recognizing text') {
-            const p = Math.round((m.progress || 0) * 100);
+            const p = 20 + Math.round((m.progress || 0) * 75);
             setOcrProgress(p);
-            setOcrStatusText(`Reading text on label... ${p}%`);
+            setOcrStatusText(`Reading printed text on wrapper... ${p}%`);
           } else if (m.status === 'loading tesseract core') {
-            setOcrStatusText('Initializing Optical Engine...');
-          } else if (m.status === 'initializing tesseract') {
-            setOcrStatusText('Preparing Optical Language Parser...');
+            setOcrStatusText('Loading optical recognition engine...');
           }
         },
       });
 
       const recognized = result?.data?.text?.trim() || '';
-      if (recognized) {
+      if (recognized && recognized.length > 5) {
         setCustomText(recognized);
         setShowCustomText(true);
         setOcrCompleted(true);
-        setOcrStatusText('Text recognized successfully!');
+        setOcrStatusText('Label text recognized! Declarations ready for screening.');
       } else {
-        setOcrStatusText('No clear text found. Ensure the label is well-lit and not blurry.');
+        setOcrStatusText('Low contrast or glare detected. Review extracted text below.');
         setShowCustomText(true);
       }
     } catch (err: any) {
       console.warn('OCR error:', err);
-      setOcrStatusText('Could not complete automated OCR. You can type declarations directly.');
+      setOcrStatusText('Camera image was hard to parse. You can verify declarations below.');
       setShowCustomText(true);
     } finally {
       setIsOcrRunning(false);
+      setOcrProgress(100);
     }
   };
 
@@ -106,7 +171,7 @@ export const ScanPage: React.FC = () => {
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
 
-    // Automatically trigger real OCR on the uploaded or captured image
+    // Automatically trigger preprocessed OCR
     runClientOcr(file);
   };
 
@@ -144,6 +209,26 @@ export const ScanPage: React.FC = () => {
     setErrorMessage(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const handleAutofillBiscuitTemplate = () => {
+    setCustomText(
+`Product: GoodDay Butter Cookies
+Brand: Britannia
+Generic Name: Butter Cookies
+Category: Food & Confectionery
+Net Weight: 200 g
+MRP: Rs. 45.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.225 / g
+Mfg Date: 08/2026
+Manufactured & Packed by: Britannia Industries Ltd.
+Address: Plot 42, KIADB Industrial Area, Phase 2, Whitefield, Bengaluru - 560066
+Consumer Care: Consumer Care Manager, 1800-425-4449
+Email: feedback@britannia.co.in
+Country of Origin: India`
+    );
+    setShowCustomText(true);
+    setSelectedDemo(null);
   };
 
   const handleStartScan = async () => {
@@ -361,7 +446,7 @@ export const ScanPage: React.FC = () => {
               onChange={(e) => setProductCategory(e.target.value)}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
             >
-              <option value="Food & Confectionery">Food & Confectionery (Biscuits, Snacks, Grains)</option>
+              <option value="Food & Confectionery">Food & Confectionery (Biscuits, Cookies, Snacks)</option>
               <option value="Personal Care">Personal Care (Soaps, Lotions, Wash)</option>
               <option value="Cosmetics">Cosmetics & Toiletries</option>
               <option value="Snack Foods">Snack Foods</option>
@@ -377,13 +462,24 @@ export const ScanPage: React.FC = () => {
                 <FileText className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Extracted Label Text ({customText ? `${customText.length} chars` : 'Empty'})</span>
               </label>
-              <button
-                type="button"
-                onClick={() => setShowCustomText(!showCustomText)}
-                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-              >
-                {showCustomText ? 'Hide Text Area' : (customText ? 'View/Edit Extracted Text' : 'Paste Raw Text')}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutofillBiscuitTemplate}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                  title="Autofill a complete biscuit label format"
+                >
+                  <Wand2 className="w-3 h-3" />
+                  <span>Sample Biscuit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCustomText(!showCustomText)}
+                  className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+                >
+                  {showCustomText ? 'Hide Text Area' : (customText ? 'View/Edit Extracted Text' : 'Paste Raw Text')}
+                </button>
+              </div>
             </div>
             {showCustomText ? (
               <textarea
@@ -392,7 +488,7 @@ export const ScanPage: React.FC = () => {
                   setCustomText(e.target.value);
                   setSelectedDemo(null);
                 }}
-                rows={4}
+                rows={5}
                 placeholder="Declarations extracted from your label appear here. You can also paste or edit text directly..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500 leading-relaxed"
               />
