@@ -3,10 +3,14 @@
 > **AI-Assisted Packaged Commodity Label Compliance Screening Application for India**  
 > Evaluated deterministically against **The Legal Metrology (Packaged Commodities) Rules, 2011** and consolidated amendments (Development Rulebook Version **2026.2**).
 
+[![Live Application](https://img.shields.io/badge/Live_Deployment-sihh--labelcheck.vercel.app-brightgreen.svg?logo=vercel&logoColor=white)](https://sihh-labelcheck.vercel.app)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI_0.110+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Frontend-React_18_+_TypeScript-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
 [![Tailwind CSS](https://img.shields.io/badge/Styling-Tailwind_CSS_3.4-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+🌐 **Live Deployed Application**: [https://sihh-labelcheck.vercel.app](https://sihh-labelcheck.vercel.app)  
+*Deploys 24/7 on remote cloud edge infrastructure, completely independent of local machine uptime.*
 
 ---
 

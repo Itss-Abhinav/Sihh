@@ -1,9 +1,17 @@
-﻿import os
+import os
 from typing import List
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def get_default_database_url() -> str:
+    explicit = os.getenv("DATABASE_URL")
+    if explicit:
+        return explicit
+    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or not os.access(".", os.W_OK):
+        return "sqlite:////tmp/labelcheck.db"
+    return "sqlite:///./labelcheck.db"
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "LABELCHECK API"
@@ -12,7 +20,7 @@ class Settings(BaseSettings):
     PORT: int = int(os.getenv("PORT", "8000"))
     
     # Database
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./labelcheck.db")
+    DATABASE_URL: str = get_default_database_url()
     
     # Security
     JWT_SECRET: str = os.getenv("JWT_SECRET", "super-secret-labelcheck-2026-key-change-in-production")

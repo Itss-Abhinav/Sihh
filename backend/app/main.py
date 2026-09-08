@@ -1,4 +1,22 @@
-﻿import uuid
+import sys
+import types
+import os
+
+# Module aliasing so imports work whether root is Sihh/ or backend/
+if "backend" not in sys.modules:
+    try:
+        import backend
+    except ImportError:
+        _b = types.ModuleType("backend")
+        sys.modules["backend"] = _b
+        try:
+            import app
+            _b.app = app
+            sys.modules["backend.app"] = app
+        except ImportError:
+            pass
+
+import uuid
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -189,5 +207,6 @@ def root():
     }
 
 @app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "healthy", "service": "LABELCHECK"}
