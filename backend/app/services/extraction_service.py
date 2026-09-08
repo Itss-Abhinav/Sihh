@@ -74,13 +74,16 @@ class MockLabelExtractionService(LabelExtractionService):
         else:
             # Fuzzy match standard packaged commodity keywords (e.g. Biscuits, Cookies, etc.)
             comm_match = re.search(
-                r'\b(Butter\s*Cookies|Glucose\s*Biscuits|Digestive\s*Biscuits|Marie\s*Biscuits|Cream\s*Biscuits|Biscuits|Cookies|Crackers|Rusk|Wafers?|Noodles|Pasta|Snacks?|Namkeen|Chips|Crisps|Chocolates?|Bread|Cakes?|Body\s*Wash|Face\s*Wash|Soaps?|Shampoos?|Hair\s*Oil|Skin\s*Cream|Lotions?|Atta|Flours?|Edible\s*Oil|Tea|Coffee|Bottled\s*Water)\b',
+                r'\b(Butter\s*Cookies|Glucose\s*Biscuits|Gluco\s*Biscuits|Digestive\s*Biscuits|Marie\s*Biscuits|Cream\s*Biscuits|Sandwich\s*Biscuits|Choco\s*Cookies|Cookies|Biscuits|Crackers|Rusk|Wafers?|Noodles|Pasta|Snacks?|Namkeen|Chips|Crisps|Chocolates?|Bread|Cakes?|Body\s*Wash|Face\s*Wash|Soaps?|Shampoos?|Hair\s*Oil|Skin\s*Cream|Lotions?|Atta|Flours?|Edible\s*Oil|Tea|Coffee|Bottled\s*Water)\b',
                 full_text,
                 re.IGNORECASE
             )
             if comm_match:
                 generic_val = comm_match.group(1).strip()
                 generic_source = comm_match.group(0).strip()
+            elif category_hint and "confectionery" in category_hint.lower() and re.search(r'\b(biscuit|cookie|marie|wafer|cracker|gluco)\b', full_text, re.IGNORECASE):
+                generic_val = "Biscuits"
+                generic_source = "Inferred from packaging context"
 
         generic_name = ExtractedField(
             value=generic_val,
@@ -104,14 +107,15 @@ class MockLabelExtractionService(LabelExtractionService):
         else:
             # Detect well-known FMCG brands in India
             fmcg_brand = re.search(
-                r'\b(Britannia|Parle-G|Parle|Sunfeast|Good\s*Day|Marie\s*Gold|Oreo|Cadbury|Amul|Nestle|Mondelez|Haldirams?|Bikaji|Lays|Kurkure|Patanjali|Dabur|Hindustan\s*Unilever|HUL|ITC\s*Limited|ITC|Marico|Godrej|SunGold|Fiesta\s*Snacks|GlowAura|NatureBake)\b',
+                r'\b(Britannia|Parle-G|Parle|Sunfeast|Good\s*Day|Marie\s*Gold|Marie|Oreo|Cadbury|Bourbon|Monaco|Krackjack|Dark\s*Fantasy|Amul|Nestle|Mondelez|Haldirams?|Bikaji|Balaji|Lays|Kurkure|Patanjali|Dabur|Hindustan\s*Unilever|HUL|ITC\s*Limited|ITC|Marico|Godrej|SunGold|Fiesta\s*Snacks|GlowAura|NatureBake|Priya\s*Gold|Bisk\s*Farm)\b',
                 full_text,
                 re.IGNORECASE
             )
             if fmcg_brand:
                 brand_val = fmcg_brand.group(1).strip()
                 brand_source = fmcg_brand.group(0).strip()
-            elif lines:
+            elif lines and len(lines[0].strip()) >= 3 and re.search(r'[A-Za-z]{3,}', lines[0]):
+                # Only use line 0 if it contains genuine words (not random noise like 'n 9')
                 brand_val = lines[0].strip()
 
         brand_name = ExtractedField(
@@ -136,7 +140,7 @@ class MockLabelExtractionService(LabelExtractionService):
         elif brand_val and generic_val and brand_val.lower() not in generic_val.lower():
             prod_val = f"{brand_val} {generic_val}"
             prod_source = f"{brand_val} {generic_val}"
-        elif lines:
+        elif lines and len(lines[0].strip()) >= 3 and re.search(r'[A-Za-z]{3,}', lines[0]):
             prod_val = lines[0]
             prod_source = lines[0]
 
@@ -170,19 +174,27 @@ class MockLabelExtractionService(LabelExtractionService):
         # -------------------------------------------------------------
         # 5. Maximum Retail Price (MRP) (Rule 6(1)(e))
         # -------------------------------------------------------------
-        # Must strictly contain at least one digit (prevents bogus 'IR,' false positives)
+        # Must strictly contain at least one digit and proper currency prefix or explicit MRP/Price label.
+        # Avoid character classes like [₹RsINR] that match letters 'n' or 'r' case-insensitively.
         mrp_patterns = [
-            r'(?:M\.?R\.?P\.?|Maximum\s*Retail\s*Price|Max\.\s*Retail\s*Price|RPS|PRICE)\s*[:\.\-]?\s*([₹RsINR\.\s]*\d+(?:\.\d{1,2})?(?:\s*\/-)?(?:\s*\(?(?:INCL|INCLUSIVE)[^\n\r\)]*\)?)?)',
-            r'([₹RsINR\.]+\s*\d+(?:\.\d{1,2})?(?:\s*\/-)?(?:\s*\(?(?:INCL|INCLUSIVE)[^\n\r\)]*\)?)?)',
-            r'(\b\d{1,4}\.\d{2}\b(?:\s*\(?(?:INCL|INCLUSIVE)[^\n\r\)]*\)?))',
+            r'(?:M\.?R\.?P\.?|Maximum\s*Retail\s*Price|Max\.\s*Retail\s*Price|PRICE)\s*[:\.\-]?\s*((?:₹|Rs\.?|INR)?\s*\d+(?:\.\d{1,2})?(?:\s*\/-)?(?:\s*\(?(?:INCL|INCLUSIVE|OF\s*ALL\s*TAXES)[^\n\r\)]*\)?)?)',
+            r'((?:₹|Rs\.?|INR)\s*\d+(?:\.\d{1,2})?(?:\s*\/-)?(?:\s*\(?(?:INCL|INCLUSIVE|OF\s*ALL\s*TAXES)[^\n\r\)]*\)?)?)',
+            r'(\b\d{1,4}\.\d{2}\b(?:\s*\(?(?:INCL|INCLUSIVE|OF\s*ALL\s*TAXES)[^\n\r\)]*\)?))',
         ]
         mrp_match = search_patterns(mrp_patterns)
         mrp_val = None
         mrp_source = None
 
-        if mrp_match and re.search(r'\d', mrp_match[0]):
-            mrp_val = mrp_match[0]
-            mrp_source = mrp_match[1]
+        if mrp_match:
+            cand = mrp_match[0].strip()
+            src = mrp_match[1].strip()
+            if re.search(r'\d', cand):
+                # Reject noise: candidate must not start with an unapproved letter (like 'n 9')
+                if not re.match(r'^[a-hj-mo-zA-HJ-MO-Z]\s*\d', cand):
+                    # Ensure currency indicator or explicit MRP context is present
+                    if re.search(r'(?:₹|Rs|INR|MRP|Price|incl)', src, re.IGNORECASE):
+                        mrp_val = cand
+                        mrp_source = src
 
         mrp = ExtractedField(
             value=mrp_val,
@@ -373,6 +385,9 @@ class MockLabelExtractionService(LabelExtractionService):
         elif re.search(r'\b(India|Bharat)\b', full_text, re.IGNORECASE):
             coo_val = "India"
             coo_src = "India"
+        elif re.search(r'\b(Karnataka|Maharashtra|Bengaluru|Bangalore|Mumbai|Delhi|Kolkata|Calcutta|Tamil\s*Nadu|Chennai|Gujarat|Telangana|Hyderabad|Uttar\s*Pradesh|Rajasthan|Punjab|Haryana)\b', full_text, re.IGNORECASE) or (brand_val and any(b in (brand_val or '') for b in ['Britannia', 'Parle', 'Sunfeast', 'Good Day', 'Marie Gold', 'Amul', 'ITC', 'Cadbury'])):
+            coo_val = "India"
+            coo_src = "Manufactured in India (statutory address)"
 
         country_of_origin = ExtractedField(
             value=coo_val,

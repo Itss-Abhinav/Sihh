@@ -41,7 +41,7 @@ async def create_scan(
     image_url = None
     ocr_text = ""
 
-    if customText and customText.strip():
+    if customText and customText.strip() and len(customText.strip()) >= 15:
         ocr_text = customText.strip()
         if image:
             image_filename = image.filename or "uploaded_label.jpg"
@@ -61,13 +61,24 @@ async def create_scan(
                 detail="Image size exceeds 15MB limit."
             )
         image_filename = image.filename or "uploaded_label.jpg"
-        # Run OCR Service
-        ocr_text = ocr_service.extract_text(contents, image_filename)
+        # Run Packaging OCR Service
+        extracted_from_image = ocr_service.extract_text(contents, image_filename)
+        
+        if extracted_from_image and len(extracted_from_image.strip()) >= 10:
+            ocr_text = extracted_from_image.strip()
+        elif customText and customText.strip():
+            ocr_text = customText.strip()
+        else:
+            ocr_text = extracted_from_image or "Product: Scanned Packaged Commodity\nNote: Optical recognition detected low contrast or glare on packaging wrapper. Please review extracted declarations."
+        
         image_url = f"/uploads/{image_filename}"
     elif demoPreset:
         ocr_text = ocr_service.get_demo_text(demoPreset)
         image_filename = f"{demoPreset}.jpg"
         image_url = f"/static/demos/{demoPreset}.jpg"
+    elif customText and customText.strip():
+        ocr_text = customText.strip()
+        image_filename = "custom_text_input.txt"
     else:
         # Default fallback to demoA
         ocr_text = ocr_service.get_demo_text("demoA")

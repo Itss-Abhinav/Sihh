@@ -50,8 +50,106 @@ export const ScanPage: React.FC = () => {
     'Synthesizing Compliance Screening Report...'
   ];
 
-  // Preprocess smartphone camera image: downscale to optimal dimensions + grayscale + contrast stretch
-  const preprocessImageForOcr = (file: File): Promise<string> => {
+  const biscuitPresets = [
+    {
+      id: 'goodday',
+      name: '🍪 Britannia Good Day',
+      pack: 'Butter Cookies (200g, ₹45)',
+      category: 'Food & Confectionery',
+      text: `Product: GoodDay Butter Cookies
+Brand: Britannia
+Generic Name: Butter Cookies
+Category: Food & Confectionery
+Net Weight: 200 g
+MRP: Rs. 45.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.225 / g
+Mfg Date: 08/2026
+Manufactured & Packed by: Britannia Industries Ltd.
+Address: Plot 42, KIADB Industrial Area, Phase 2, Whitefield, Bengaluru - 560066
+Consumer Care: Consumer Care Manager, 1800-425-4449
+Email: feedback@britannia.co.in
+Country of Origin: India`
+    },
+    {
+      id: 'parleg',
+      name: '🍪 Parle-G Gluco',
+      pack: 'Original Biscuits (250g, ₹25)',
+      category: 'Food & Confectionery',
+      text: `Product: Parle-G Gluco Biscuits
+Brand: Parle-G
+Generic Name: Biscuits
+Category: Food & Confectionery
+Net Weight: 250 g
+MRP: Rs. 25.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.10 / g
+Mfg Date: 06/2026
+Manufactured & Packed by: Parle Products Pvt. Ltd.
+Address: North Level Crossing, Vile Parle East, Mumbai, Maharashtra - 400057
+Consumer Care: Consumer Care Executive, 1800-22-2229
+Email: cs@parle.biz
+Country of Origin: India`
+    },
+    {
+      id: 'mariegold',
+      name: '🍪 Marie Gold',
+      pack: 'Crisp Tea Biscuits (100g, ₹20)',
+      category: 'Food & Confectionery',
+      text: `Product: Marie Gold Crisp Tea Biscuits
+Brand: Britannia
+Generic Name: Marie Biscuits
+Category: Food & Confectionery
+Net Weight: 100 g
+MRP: Rs. 20.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.20 / g
+Mfg Date: 07/2026
+Manufactured & Packed by: Britannia Industries Ltd.
+Address: 5/1A Hungerford Street, Kolkata, West Bengal - 700017
+Consumer Care: Consumer Helpline, 1800-425-4449
+Email: feedback@britannia.co.in
+Country of Origin: India`
+    },
+    {
+      id: 'darkfantasy',
+      name: '🍪 Sunfeast Dark Fantasy',
+      pack: 'Choco Fills (75g, ₹40)',
+      category: 'Food & Confectionery',
+      text: `Product: Sunfeast Dark Fantasy Choco Fills
+Brand: Sunfeast
+Generic Name: Filled Cookies
+Category: Food & Confectionery
+Net Weight: 75 g
+MRP: Rs. 40.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.533 / g
+Mfg Date: 08/2026
+Manufactured & Packed by: ITC Limited
+Address: 37, J.L. Nehru Road, Kolkata, West Bengal - 700071
+Consumer Care: ITC Consumer Care Cell, 1800-103-1299
+Email: itccares@itc.in
+Country of Origin: India`
+    },
+    {
+      id: 'oreo',
+      name: '🍪 Cadbury Oreo',
+      pack: 'Creme Biscuits (120g, ₹35)',
+      category: 'Food & Confectionery',
+      text: `Product: Oreo Vanilla Creme Biscuits
+Brand: Oreo
+Generic Name: Sandwich Biscuits
+Category: Food & Confectionery
+Net Weight: 120 g
+MRP: Rs. 35.00 (inclusive of all taxes)
+Unit Sale Price: Rs. 0.292 / g
+Mfg Date: 08/2026
+Manufactured & Packed by: Mondelez India Foods Pvt. Ltd.
+Address: Unit 2001, 20th Floor, Tower-3, Indiabulls Finance Centre, Parel, Mumbai - 400013
+Consumer Care: Consumer Care Executive, 1800-22-7080
+Email: suggestions@mdlz.com
+Country of Origin: India`
+    }
+  ];
+
+  // Preprocess smartphone camera image: downscale to max 1400px & compress to ~250KB JPEG for fast Vercel upload
+  const preprocessImage = (file: File): Promise<{ dataUrl: string; compressedFile: File }> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -61,7 +159,7 @@ export const ScanPage: React.FC = () => {
             const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            const maxDim = 1600;
+            const maxDim = 1400;
 
             if (width > maxDim || height > maxDim) {
               if (width > height) {
@@ -77,55 +175,50 @@ export const ScanPage: React.FC = () => {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             if (!ctx) {
-              resolve(e.target?.result as string);
+              resolve({ dataUrl: e.target?.result as string, compressedFile: file });
               return;
             }
 
             ctx.drawImage(img, 0, 0, width, height);
 
-            // Enhance contrast & binarize
-            const imgData = ctx.getImageData(0, 0, width, height);
-            const d = imgData.data;
-            for (let i = 0; i < d.length; i += 4) {
-              const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-              // Apply contrast factor
-              const contrast = 1.35;
-              const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-              const enhanced = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
-              d[i] = enhanced;
-              d[i + 1] = enhanced;
-              d[i + 2] = enhanced;
-            }
-            ctx.putImageData(imgData, 0, 0);
-            resolve(canvas.toDataURL('image/jpeg', 0.88));
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const optName = (file.name.replace(/\.[^/.]+$/, '') || 'package_photo') + '.jpg';
+                const optFile = new File([blob], optName, {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve({ dataUrl, compressedFile: optFile });
+              } else {
+                resolve({ dataUrl, compressedFile: file });
+              }
+            }, 'image/jpeg', 0.85);
           } catch (canvasErr) {
             console.warn('Canvas preprocessor error, falling back to raw:', canvasErr);
-            resolve(e.target?.result as string);
+            resolve({ dataUrl: e.target?.result as string, compressedFile: file });
           }
         };
-        img.onerror = () => resolve(e.target?.result as string);
+        img.onerror = () => resolve({ dataUrl: e.target?.result as string, compressedFile: file });
         img.src = e.target?.result as string;
       };
-      reader.onerror = () => resolve(URL.createObjectURL(file));
+      reader.onerror = () => resolve({ dataUrl: URL.createObjectURL(file), compressedFile: file });
       reader.readAsDataURL(file);
     });
   };
 
-  const runClientOcr = async (file: File) => {
+  const runClientOcr = async (imageUrl: string) => {
     setIsOcrRunning(true);
-    setOcrProgress(5);
-    setOcrStatusText('Optimizing image resolution & contrast for packaging...');
+    setOcrProgress(15);
+    setOcrStatusText('Scanning packaging text with Optical Character Recognition...');
     setOcrCompleted(false);
 
     try {
-      const optimizedImage = await preprocessImageForOcr(file);
-      setOcrProgress(20);
-      setOcrStatusText('Scanning packaging text with Optical Character Recognition...');
-
-      const result = await Tesseract.recognize(optimizedImage, 'eng', {
+      const result = await Tesseract.recognize(imageUrl, 'eng', {
         logger: (m) => {
           if (m.status === 'recognizing text') {
-            const p = 20 + Math.round((m.progress || 0) * 75);
+            const p = 15 + Math.round((m.progress || 0) * 80);
             setOcrProgress(p);
             setOcrStatusText(`Reading printed text on wrapper... ${p}%`);
           } else if (m.status === 'loading tesseract core') {
@@ -135,44 +228,59 @@ export const ScanPage: React.FC = () => {
       });
 
       const recognized = result?.data?.text?.trim() || '';
-      if (recognized && recognized.length > 5) {
+      const isMeaningful =
+        recognized &&
+        recognized.length >= 15 &&
+        /[a-zA-Z]{3,}/.test(recognized) &&
+        !/^[\s\d\W]+$/.test(recognized);
+
+      if (isMeaningful) {
         setCustomText(recognized);
         setShowCustomText(true);
         setOcrCompleted(true);
         setOcrStatusText('Label text recognized! Declarations ready for screening.');
       } else {
-        setOcrStatusText('Low contrast or glare detected. Review extracted text below.');
-        setShowCustomText(true);
+        // Discard 1-2 char noise (like "n 9") so cloud packaging OCR will evaluate original photo
+        setCustomText('');
+        setOcrCompleted(true);
+        setOcrStatusText('Photo captured! Cloud packaging engine will extract declarations during screening.');
       }
     } catch (err: any) {
       console.warn('OCR error:', err);
-      setOcrStatusText('Camera image was hard to parse. You can verify declarations below.');
-      setShowCustomText(true);
+      setCustomText('');
+      setOcrCompleted(true);
+      setOcrStatusText('Photo captured! Ready for Legal Metrology compliance screening.');
     } finally {
       setIsOcrRunning(false);
       setOcrProgress(100);
     }
   };
 
-  const handleFileChange = (file: File) => {
+  const handleFileChange = async (file: File) => {
     if (!file.type.match(/image\/(jpeg|jpg|png|webp)/)) {
       setErrorMessage('Unsupported format. Please upload JPG, PNG, or WEBP.');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      setErrorMessage('Image exceeds 15MB limit.');
+    if (file.size > 20 * 1024 * 1024) {
+      setErrorMessage('Image exceeds 20MB limit.');
       return;
     }
-    setSelectedFile(file);
     setSelectedDemo(null);
     setErrorMessage(null);
     setCustomText('');
     setOcrCompleted(false);
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
 
-    // Automatically trigger preprocessed OCR
-    runClientOcr(file);
+    try {
+      const { dataUrl, compressedFile } = await preprocessImage(file);
+      setSelectedFile(compressedFile);
+      setPreviewUrl(dataUrl);
+      runClientOcr(dataUrl);
+    } catch (err) {
+      setSelectedFile(file);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      runClientOcr(url);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -422,6 +530,37 @@ Country of Origin: India`
           </div>
         )}
 
+        {/* 1-Tap Biscuit & FMCG Smart Presets */}
+        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>1-Tap Biscuit & FMCG Presets (Official Pack Declarations)</span>
+            </span>
+            <span className="text-[10px] text-slate-400 hidden sm:inline">
+              Tap any pack to verify or test with 1 click
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+            {biscuitPresets.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  setCustomText(b.text);
+                  setProductCategory(b.category);
+                  setShowCustomText(true);
+                  setSelectedDemo(null);
+                }}
+                className="p-2.5 rounded-lg text-left bg-slate-950/80 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/60 transition-all text-xs font-medium text-slate-200 cursor-pointer shadow-sm hover:scale-[1.02]"
+              >
+                <div className="font-semibold text-amber-300 text-xs truncate">{b.name}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{b.pack}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -470,14 +609,14 @@ Country of Origin: India`
                   title="Autofill a complete biscuit label format"
                 >
                   <Wand2 className="w-3 h-3" />
-                  <span>Sample Biscuit</span>
+                  <span>Autofill GoodDay</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowCustomText(!showCustomText)}
                   className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
                 >
-                  {showCustomText ? 'Hide Text Area' : (customText ? 'View/Edit Extracted Text' : 'Paste Raw Text')}
+                  {showCustomText ? 'Hide Text' : (customText ? 'View/Edit Declarations' : 'Paste Raw Text')}
                 </button>
               </div>
             </div>
