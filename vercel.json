@@ -18,6 +18,10 @@
       }
     },
     {
+      "source": "/report/(.*)",
+      "destination": "/report"
+    },
+    {
       "source": "/(.*)",
       "destination": {
         "type": "service",
