@@ -357,9 +357,17 @@ Country of Origin: India`
       const formData = new FormData();
       if (selectedFile) {
         formData.append('image', selectedFile);
-        if (customText.trim()) {
-          formData.append('customText', customText.trim());
+        // Only send customText alongside the image if it contains real packaging keywords
+        // This prevents garbage client-side OCR (e.g. "fo en Cam el TA") from overriding server OCR
+        const text = customText.trim();
+        const packagingKeywords = ['mrp', 'net', 'brand', 'product', 'mfg', 'manufactured', 'packed',
+          'address', 'consumer', 'country', 'origin', 'weight', 'quantity', 'price',
+          'ingredients', 'biscuit', 'cookie', 'pvt', 'ltd', '1800', 'email', 'toll free'];
+        const keywordHits = packagingKeywords.filter(kw => text.toLowerCase().includes(kw)).length;
+        if (text && keywordHits >= 3) {
+          formData.append('customText', text);
         }
+        // else: let the backend run server-side OCR.space on the actual photo
       } else if (selectedDemo) {
         formData.append('demoPreset', selectedDemo);
       } else if (customText.trim()) {

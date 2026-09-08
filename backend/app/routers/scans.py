@@ -41,14 +41,22 @@ async def create_scan(
     image_url = None
     ocr_text = ""
 
-    if customText and customText.strip() and len(customText.strip()) >= 15:
-        ocr_text = customText.strip()
-        if image:
-            image_filename = image.filename or "uploaded_label.jpg"
-            image_url = f"/uploads/{image_filename}"
-        else:
-            image_filename = "custom_text_input.txt"
-    elif image:
+    # Helper: check if text looks like real packaging declarations (not OCR garbage)
+    import re as _re
+    def _is_quality_text(txt: str) -> bool:
+        if not txt or len(txt.strip()) < 20:
+            return False
+        t = txt.lower()
+        packaging_keywords = ['mrp', 'net', 'brand', 'product', 'mfg', 'manufactured', 'packed',
+                              'address', 'consumer', 'country', 'origin', 'weight', 'quantity',
+                              'price', 'ingredients', 'nutritional', 'best before', 'expiry',
+                              'batch', 'lot', 'fssai', 'lic', 'toll free', '1800', 'email',
+                              'pvt', 'ltd', 'limited', 'industries', 'biscuit', 'cookie']
+        hits = sum(1 for kw in packaging_keywords if kw in t)
+        return hits >= 3
+
+    if image:
+        # ALWAYS process the image via server-side OCR when an image is present
         if image.content_type not in ALLOWED_IMAGE_TYPES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -61,24 +69,34 @@ async def create_scan(
                 detail="Image size exceeds 15MB limit."
             )
         image_filename = image.filename or "uploaded_label.jpg"
-        # Run Packaging OCR Service
-        extracted_from_image = ocr_service.extract_text(contents, image_filename)
-        
-        if extracted_from_image and len(extracted_from_image.strip()) >= 10:
-            ocr_text = extracted_from_image.strip()
-        elif customText and customText.strip():
-            ocr_text = customText.strip()
-        else:
-            ocr_text = extracted_from_image or "Product: Scanned Packaged Commodity\nNote: Optical recognition detected low contrast or glare on packaging wrapper. Please review extracted declarations."
-        
         image_url = f"/uploads/{image_filename}"
+
+        # Step A: Run server-side packaging OCR on the actual image
+        server_ocr_text = ocr_service.extract_text(contents, image_filename)
+
+        # Step B: Decide which text source to use
+        if server_ocr_text and len(server_ocr_text.strip()) >= 15:
+            ocr_text = server_ocr_text.strip()
+        elif customText and _is_quality_text(customText):
+            # Only use client-provided text if it contains real packaging keywords
+            ocr_text = customText.strip()
+        elif server_ocr_text and len(server_ocr_text.strip()) >= 5:
+            ocr_text = server_ocr_text.strip()
+        else:
+            ocr_text = "Product: Scanned Packaged Commodity\nNote: Optical recognition detected low contrast or glare on packaging wrapper. Please review extracted declarations."
+
+    elif customText and _is_quality_text(customText):
+        # No image — user typed/pasted quality text with packaging keywords
+        ocr_text = customText.strip()
+        image_filename = "custom_text_input.txt"
+    elif customText and customText.strip() and len(customText.strip()) >= 15:
+        # Shorter text without keywords — still accept if no image
+        ocr_text = customText.strip()
+        image_filename = "custom_text_input.txt"
     elif demoPreset:
         ocr_text = ocr_service.get_demo_text(demoPreset)
         image_filename = f"{demoPreset}.jpg"
         image_url = f"/static/demos/{demoPreset}.jpg"
-    elif customText and customText.strip():
-        ocr_text = customText.strip()
-        image_filename = "custom_text_input.txt"
     else:
         # Default fallback to demoA
         ocr_text = ocr_service.get_demo_text("demoA")
