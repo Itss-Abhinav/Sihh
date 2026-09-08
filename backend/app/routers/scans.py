@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 import json
 import datetime
 from typing import Optional, List
@@ -41,13 +41,13 @@ async def create_scan(
     image_url = None
     ocr_text = ""
 
-    if demoPreset:
-        ocr_text = ocr_service.get_demo_text(demoPreset)
-        image_filename = f"{demoPreset}.jpg"
-        image_url = f"/static/demos/{demoPreset}.jpg"
-    elif customText and customText.strip():
+    if customText and customText.strip():
         ocr_text = customText.strip()
-        image_filename = "custom_text_input.txt"
+        if image:
+            image_filename = image.filename or "uploaded_label.jpg"
+            image_url = f"/uploads/{image_filename}"
+        else:
+            image_filename = "custom_text_input.txt"
     elif image:
         if image.content_type not in ALLOWED_IMAGE_TYPES:
             raise HTTPException(
@@ -64,6 +64,10 @@ async def create_scan(
         # Run OCR Service
         ocr_text = ocr_service.extract_text(contents, image_filename)
         image_url = f"/uploads/{image_filename}"
+    elif demoPreset:
+        ocr_text = ocr_service.get_demo_text(demoPreset)
+        image_filename = f"{demoPreset}.jpg"
+        image_url = f"/static/demos/{demoPreset}.jpg"
     else:
         # Default fallback to demoA
         ocr_text = ocr_service.get_demo_text("demoA")

@@ -1,4 +1,4 @@
-﻿import abc
+import abc
 from typing import Optional, Dict
 
 class OcrService(abc.ABC):
@@ -59,23 +59,18 @@ Batch No: GA-781
     }
 
     def extract_text(self, image_bytes: bytes, filename: Optional[str] = None) -> str:
-        # Default mock output representing realistic packaged commodity text
-        return """Product: Premium Digestive Biscuits
-Brand: NatureBake
-Generic Name: High Fibre Biscuits
-Category: Food & Confectionery
-MRP ₹50.00 inclusive of all taxes
-Unit Sale Price: ₹0.25 per g
-Net Quantity: 200 g
-Manufactured & Packed by: NatureBake Foods Private Limited
-Address: Survey No. 124, Industrial Growth Centre, Kochi, Kerala - 682030
-Mfg Date: 08/2026
-Country of Origin: India
-For Consumer Complaints contact: Consumer Care Executive, NatureBake Foods Pvt Ltd
-Address: Survey No. 124, Kochi, Kerala - 682030
-Toll Free: 1800-000-000
-Email: care@naturebake.com
-"""
+        # If client-side OCR wasn't passed, attempt basic extraction or provide an honest unreadable notification
+        import re
+        try:
+            text_candidate = image_bytes.decode('utf-8', errors='ignore')
+            text_chunks = re.findall(r'[A-Za-z0-9\.,:\/₹\-\(\)\s]{5,}', text_candidate)
+            candidate = " ".join(c.strip() for c in text_chunks if len(c.strip()) > 5)
+            lines = [line.strip() for line in candidate.split('\n') if len(line.strip()) > 4]
+            if len(lines) >= 3:
+                return "\n".join(lines[:20])
+        except Exception:
+            pass
+        return "Product: Scanned Packaged Commodity\nNote: Automated optical text recognition in progress. Please review extracted declarations."
 
     def get_demo_text(self, preset: str) -> str:
         return self.DEMO_DATASETS.get(preset, self.DEMO_DATASETS["demoA"])

@@ -1,6 +1,19 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UploadCloud, Camera, Image as ImageIcon, X, Sparkles, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
+import {
+  UploadCloud,
+  Camera,
+  Image as ImageIcon,
+  X,
+  Sparkles,
+  CheckCircle2,
+  ArrowRight,
+  Loader2,
+  FileText,
+  AlertCircle,
+  Eye
+} from 'lucide-react';
+import Tesseract from 'tesseract.js';
 import { DemoSelector } from '../components/DemoSelector';
 import { LegalDisclaimer } from '../components/LegalDisclaimer';
 import { scansApi } from '../api/scans';
@@ -12,10 +25,16 @@ export const ScanPage: React.FC = () => {
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedDemo, setSelectedDemo] = useState<string | null>('demoA');
+  const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
   const [productCategory, setProductCategory] = useState<string>('Food & Confectionery');
   const [customText, setCustomText] = useState<string>('');
   const [showCustomText, setShowCustomText] = useState<boolean>(false);
+
+  // Optical Character Recognition (OCR) State
+  const [isOcrRunning, setIsOcrRunning] = useState<boolean>(false);
+  const [ocrProgress, setOcrProgress] = useState<number>(0);
+  const [ocrStatusText, setOcrStatusText] = useState<string>('');
+  const [ocrCompleted, setOcrCompleted] = useState<boolean>(false);
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingStep, setProcessingStep] = useState<number>(0);
@@ -30,6 +49,46 @@ export const ScanPage: React.FC = () => {
     'Synthesizing Compliance Screening Report...'
   ];
 
+  const runClientOcr = async (file: File) => {
+    setIsOcrRunning(true);
+    setOcrProgress(10);
+    setOcrStatusText('Loading Optical Recognition Model...');
+    setOcrCompleted(false);
+
+    try {
+      const result = await Tesseract.recognize(file, 'eng', {
+        logger: (m) => {
+          if (m.status === 'recognizing text') {
+            const p = Math.round((m.progress || 0) * 100);
+            setOcrProgress(p);
+            setOcrStatusText(`Reading text on label... ${p}%`);
+          } else if (m.status === 'loading tesseract core') {
+            setOcrStatusText('Initializing Optical Engine...');
+          } else if (m.status === 'initializing tesseract') {
+            setOcrStatusText('Preparing Optical Language Parser...');
+          }
+        },
+      });
+
+      const recognized = result?.data?.text?.trim() || '';
+      if (recognized) {
+        setCustomText(recognized);
+        setShowCustomText(true);
+        setOcrCompleted(true);
+        setOcrStatusText('Text recognized successfully!');
+      } else {
+        setOcrStatusText('No clear text found. Ensure the label is well-lit and not blurry.');
+        setShowCustomText(true);
+      }
+    } catch (err: any) {
+      console.warn('OCR error:', err);
+      setOcrStatusText('Could not complete automated OCR. You can type declarations directly.');
+      setShowCustomText(true);
+    } finally {
+      setIsOcrRunning(false);
+    }
+  };
+
   const handleFileChange = (file: File) => {
     if (!file.type.match(/image\/(jpeg|jpg|png|webp)/)) {
       setErrorMessage('Unsupported format. Please upload JPG, PNG, or WEBP.');
@@ -42,8 +101,13 @@ export const ScanPage: React.FC = () => {
     setSelectedFile(file);
     setSelectedDemo(null);
     setErrorMessage(null);
+    setCustomText('');
+    setOcrCompleted(false);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
+
+    // Automatically trigger real OCR on the uploaded or captured image
+    runClientOcr(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -54,9 +118,16 @@ export const ScanPage: React.FC = () => {
   };
 
   const handleSelectDemo = (demoId: string) => {
+    if (selectedDemo === demoId) {
+      setSelectedDemo(null);
+      return;
+    }
     setSelectedDemo(demoId);
     setSelectedFile(null);
     setPreviewUrl(null);
+    setCustomText('');
+    setIsOcrRunning(false);
+    setOcrCompleted(false);
     setErrorMessage(null);
     if (demoId === 'demoA') setProductCategory('Food & Confectionery');
     if (demoId === 'demoB') setProductCategory('Snack Foods');
@@ -68,6 +139,8 @@ export const ScanPage: React.FC = () => {
     setPreviewUrl(null);
     setSelectedDemo(null);
     setCustomText('');
+    setIsOcrRunning(false);
+    setOcrCompleted(false);
     setErrorMessage(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
@@ -75,7 +148,7 @@ export const ScanPage: React.FC = () => {
 
   const handleStartScan = async () => {
     if (!selectedFile && !selectedDemo && !customText.trim()) {
-      setErrorMessage('Please upload an image, choose a benchmark demo, or enter text.');
+      setErrorMessage('Please capture/upload an image, select a benchmark demo, or enter label text.');
       return;
     }
 
@@ -91,13 +164,15 @@ export const ScanPage: React.FC = () => {
       const formData = new FormData();
       if (selectedFile) {
         formData.append('image', selectedFile);
-      }
-      if (selectedDemo) {
+        if (customText.trim()) {
+          formData.append('customText', customText.trim());
+        }
+      } else if (selectedDemo) {
         formData.append('demoPreset', selectedDemo);
-      }
-      if (customText.trim()) {
+      } else if (customText.trim()) {
         formData.append('customText', customText.trim());
       }
+
       if (productCategory) {
         formData.append('productCategory', productCategory);
       }
@@ -118,17 +193,23 @@ export const ScanPage: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Packaged Commodity Screening Scan</h1>
-        <p className="text-xs sm:text-sm text-slate-400 mt-1">
-          Upload an image of the retail package label or test with synthetic benchmark presets.
+        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+          <span>Screen Packaged Commodity Label</span>
+          <span className="text-[11px] font-mono font-medium text-emerald-400 bg-emerald-950/70 border border-emerald-800 px-2 py-0.5 rounded">
+            Rulebook 2026.2
+          </span>
+        </h1>
+        <p className="text-sm text-slate-400 mt-1">
+          Capture or upload any commodity label. The engine extracts declarations optically and evaluates 21 deterministic statutory checks.
         </p>
       </div>
 
-      <LegalDisclaimer variant="banner" />
+      <LegalDisclaimer />
 
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-800 text-rose-300 text-xs font-medium">
-          {errorMessage}
+        <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-800 text-rose-300 text-xs font-medium flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>{errorMessage}</span>
         </div>
       )}
 
@@ -170,51 +251,72 @@ export const ScanPage: React.FC = () => {
         </div>
       )}
 
-      <div className="glass-panel p-5 rounded-2xl border border-slate-800">
-        <DemoSelector
-          selectedDemo={selectedDemo}
-          onSelectDemo={handleSelectDemo}
-          disabled={isProcessing}
-        />
-      </div>
-
+      {/* Upload or Camera Card */}
       <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <ImageIcon className="w-4 h-4 text-emerald-400" />
-            <span>Upload Label Image (Optional if using Benchmark)</span>
+            <span>Product Label Image (Mobile Camera or Upload)</span>
           </h3>
           {(selectedFile || previewUrl) && (
             <button
               onClick={handleClear}
-              className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 font-medium"
+              className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 font-medium cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
-              <span>Remove</span>
+              <span>Remove Photo</span>
             </button>
           )}
         </div>
 
         {previewUrl ? (
-          <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 max-h-80 flex items-center justify-center">
-            <img src={previewUrl} alt="Label preview" className="max-h-80 object-contain mx-auto" />
-            <div className="absolute bottom-2 left-2 bg-slate-900/80 backdrop-blur text-[11px] font-mono text-slate-300 px-2 py-1 rounded border border-slate-700">
-              {selectedFile?.name} ({(selectedFile ? selectedFile.size / 1024 : 0).toFixed(1)} KB)
+          <div className="space-y-4">
+            <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950 max-h-80 flex items-center justify-center">
+              <img src={previewUrl} alt="Label preview" className="max-h-80 object-contain mx-auto" />
+              <div className="absolute bottom-2 left-2 bg-slate-900/90 backdrop-blur text-[11px] font-mono text-slate-300 px-2.5 py-1 rounded border border-slate-700">
+                {selectedFile?.name} ({(selectedFile ? selectedFile.size / 1024 : 0).toFixed(1)} KB)
+              </div>
             </div>
+
+            {/* OCR Live Status Banner */}
+            {isOcrRunning && (
+              <div className="p-4 rounded-xl bg-slate-900 border border-emerald-500/40 space-y-2">
+                <div className="flex items-center justify-between text-xs text-emerald-400 font-medium">
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                    <span>{ocrStatusText}</span>
+                  </span>
+                  <span className="font-mono">{ocrProgress}%</span>
+                </div>
+                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${ocrProgress}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
+            {ocrCompleted && (
+              <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-xs text-emerald-300 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Text successfully extracted from your photo! Review or refine declarations below before screening.</span>
+              </div>
+            )}
           </div>
         ) : (
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl p-8 text-center cursor-pointer transition-colors bg-slate-950/40 hover:bg-slate-900/40 space-y-3"
+            className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl p-8 text-center cursor-pointer transition-colors bg-slate-950/40 hover:bg-slate-900/40 space-y-4"
           >
-            <div className="w-12 h-12 rounded-xl bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
-              <UploadCloud className="w-6 h-6 text-emerald-400" />
+            <div className="w-14 h-14 rounded-2xl bg-slate-800/80 text-emerald-400 mx-auto flex items-center justify-center border border-slate-700 shadow-inner">
+              <UploadCloud className="w-7 h-7 text-emerald-400" />
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-200">
-                Drag & drop label image here, or <span className="text-emerald-400 underline">browse files</span>
+                Tap or drag & drop label photo here
               </p>
               <p className="text-xs text-slate-400 mt-1">Supports JPG, JPEG, PNG, WEBP (up to 15MB)</p>
             </div>
@@ -226,10 +328,10 @@ export const ScanPage: React.FC = () => {
                   e.stopPropagation();
                   cameraInputRef.current?.click();
                 }}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
+                className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 px-4 py-2 rounded-xl border border-emerald-700/80 transition-all shadow-md cursor-pointer"
               >
-                <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Use Mobile Camera</span>
+                <Camera className="w-4 h-4 text-emerald-400" />
+                <span>Take Photo with Camera</span>
               </button>
             </div>
           </div>
@@ -271,13 +373,16 @@ export const ScanPage: React.FC = () => {
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-300">Custom OCR / Label Text</label>
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Extracted Label Text ({customText ? `${customText.length} chars` : 'Empty'})</span>
+              </label>
               <button
                 type="button"
                 onClick={() => setShowCustomText(!showCustomText)}
-                className="text-[11px] text-emerald-400 hover:text-emerald-300"
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
               >
-                {showCustomText ? 'Collapse Textbox' : 'Paste Raw Text'}
+                {showCustomText ? 'Hide Text Area' : (customText ? 'View/Edit Extracted Text' : 'Paste Raw Text')}
               </button>
             </div>
             {showCustomText ? (
@@ -287,28 +392,52 @@ export const ScanPage: React.FC = () => {
                   setCustomText(e.target.value);
                   setSelectedDemo(null);
                 }}
-                rows={3}
-                placeholder="Paste OCR text here to test rule engine clauses..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
+                rows={4}
+                placeholder="Declarations extracted from your label appear here. You can also paste or edit text directly..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500 leading-relaxed"
               />
             ) : (
               <p className="text-xs text-slate-400 pt-2 leading-relaxed">
-                Click "Paste Raw Text" above to paste test label strings directly.
+                {customText ? (
+                  <span className="text-emerald-400">
+                    Label text extracted! Click "View/Edit Extracted Text" above to review.
+                  </span>
+                ) : (
+                  'Take a photo above or click "Paste Raw Text" to provide declarations.'
+                )}
               </p>
             )}
           </div>
         </div>
       </div>
 
+      {/* Benchmark Presets Section */}
+      <div className="glass-panel p-5 rounded-2xl border border-slate-800">
+        <DemoSelector
+          selectedDemo={selectedDemo}
+          onSelectDemo={handleSelectDemo}
+          disabled={isProcessing}
+        />
+      </div>
+
       <div className="flex items-center justify-end gap-3 pt-2">
         <button
           type="button"
           onClick={handleStartScan}
-          disabled={isProcessing}
+          disabled={isProcessing || isOcrRunning}
           className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-6 py-3 rounded-xl shadow-lg shadow-emerald-950/60 transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
         >
-          <span>Run Compliance Screening</span>
-          <ArrowRight className="w-4 h-4" />
+          {isOcrRunning ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+              <span>Extracting Text...</span>
+            </>
+          ) : (
+            <>
+              <span>Run Compliance Screening</span>
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
         </button>
       </div>
     </div>
